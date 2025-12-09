@@ -28,6 +28,60 @@ class MainParser:
         chrome_options: Chrome options.
         parser_options: Parser options.
     """
+
+    def _should_stop_parsing(self) -> bool:
+    """Определяет, нужно ли прекращать парсинг текущего URL."""
+        
+        # 1. Проверка через JavaScript (быстрее)
+        script = """
+        function hasText(patterns) {
+            const bodyText = document.body.innerText || '';
+            const htmlText = document.body.innerHTML || '';
+            
+            for (const pattern of patterns) {
+                if (bodyText.includes(pattern) || htmlText.includes(pattern)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        const stopPatterns = [
+            'Ничего не нашлось',
+            'Точных совпадений нет',
+            'Не найдено',
+            'По вашему запросу ничего не найдено',
+            'ничего не найдено',
+            '0 результатов'
+        ];
+        
+        return hasText(stopPatterns);
+        """
+        
+        try:
+            result = self._chrome_remote.execute_script(script)
+            if result:
+                return True
+        except:
+            pass
+        
+        # 2. Дополнительная проверка через DOM (на всякий случай)
+        dom_tree = self._chrome_remote.get_document()
+        
+        # Ищем специфичные элементы 2GIS, которые появляются при пустых результатах
+        empty_result_selectors = [
+            lambda x: x.local_name == 'div' and 'data-qa' in x.attributes and 'empty' in x.attributes['data-qa'],
+            lambda x: x.local_name == 'div' and 'class' in x.attributes and any(
+                cls in x.attributes['class'] for cls in ['empty', 'no-results', 'not-found']
+            ),
+        ]
+        
+        for selector in empty_result_selectors:
+            if dom_tree.search(selector):
+                return True
+        
+        return False
+    
     def __init__(self, url: str,
                  chrome_options: ChromeOptions,
                  parser_options: ParserOptions) -> None:
@@ -137,6 +191,11 @@ class MainParser:
         return None
 
     def parse(self, writer: FileWriter) -> None:
+        while True:
+        # Проверяем, нужно ли прекращать парсинг
+        if self._should_stop_parsing():
+            logger.info('Обнаружены признаки отсутствия результатов. Завершение парсинга.')
+            break
         """Parse URL with result items.
 
         Args:
