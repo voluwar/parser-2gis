@@ -28,9 +28,30 @@ class MainParser:
         chrome_options: Chrome options.
         parser_options: Parser options.
     """
+    def __init__(self, url: str,
+                 chrome_options: ChromeOptions,
+                 parser_options: ParserOptions) -> None:
+        self._options = parser_options
+        self._url = url
+
+        # "Catalog Item Document" response pattern.
+        self._item_response_pattern = r'https://catalog\.api\.2gis.[^/]+/.*/items/byid'
+
+        # Open browser, start remote
+        response_patterns = [self._item_response_pattern]
+        self._chrome_remote = ChromeRemote(chrome_options=chrome_options,
+                                           response_patterns=response_patterns)
+        self._chrome_remote.start()
+
+        # Add counter for 2GIS requsts
+        self._add_xhr_counter()
+
+        # Disable specific requests
+        blocked_urls = blocked_requests(extended=chrome_options.disable_images)
+        self._chrome_remote.add_blocked_requests(blocked_urls)
 
     def _should_stop_parsing(self) -> bool:
-    """Определяет, нужно ли прекращать парсинг текущего URL."""
+        """Определяет, нужно ли прекращать парсинг текущего URL."""
         
         # 1. Проверка через JavaScript (быстрее)
         script = """
@@ -81,28 +102,6 @@ class MainParser:
                 return True
         
         return False
-    
-    def __init__(self, url: str,
-                 chrome_options: ChromeOptions,
-                 parser_options: ParserOptions) -> None:
-        self._options = parser_options
-        self._url = url
-
-        # "Catalog Item Document" response pattern.
-        self._item_response_pattern = r'https://catalog\.api\.2gis.[^/]+/.*/items/byid'
-
-        # Open browser, start remote
-        response_patterns = [self._item_response_pattern]
-        self._chrome_remote = ChromeRemote(chrome_options=chrome_options,
-                                           response_patterns=response_patterns)
-        self._chrome_remote.start()
-
-        # Add counter for 2GIS requsts
-        self._add_xhr_counter()
-
-        # Disable specific requests
-        blocked_urls = blocked_requests(extended=chrome_options.disable_images)
-        self._chrome_remote.add_blocked_requests(blocked_urls)
 
     @staticmethod
     def url_pattern():
@@ -191,11 +190,6 @@ class MainParser:
         return None
 
     def parse(self, writer: FileWriter) -> None:
-        while True:
-        # Проверяем, нужно ли прекращать парсинг
-        if self._should_stop_parsing():
-            logger.info('Обнаружены признаки отсутствия результатов. Завершение парсинга.')
-            break
         """Parse URL with result items.
 
         Args:
@@ -251,6 +245,11 @@ class MainParser:
             return links
 
         while True:
+            # Проверяем, нужно ли прекращать парсинг
+            if self._should_stop_parsing():
+                logger.info('Обнаружены признаки отсутствия результатов. Завершение парсинга.')
+                break
+
             # Wait all 2GIS requests get finished
             self._wait_requests_finished()
 
